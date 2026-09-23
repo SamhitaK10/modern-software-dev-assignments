@@ -1,6 +1,6 @@
 # Assignments for CS146S: The Modern Software Developer
 
-This is the home of the assignments for [CS146S: The Modern Software Developer](https://themodernsoftware.dev), taught at Stanford University fall 2025.
+This is the home of the assignments for [CS146S: The Modern Software Developer](https://themodernsoftware.dev), taught at Stanford University fall 2026.
 
 ## Repo Setup
 These steps work with Python 3.12.
