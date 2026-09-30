@@ -29,7 +29,12 @@ Setup: `pip install -r week2/requirements.txt`, create a Linear OAuth app (redir
 | Brake on the write tool | `server.py:184-235` `create_issue` (docstring at `:199`) | `dry_run` defaults to `true`: the first call resolves the team name and returns a preview without writing. The agent has to repeat the call with `dry_run=false`. Annotations: `readOnlyHint=True` on the three readers, `readOnlyHint=False, destructiveHint=False, idempotentHint=False` on the writer. The docstring warns that a real call is not idempotent. |
 
 **One thing you changed after watching the agent misuse a tool:**
-> Honest note: this was built and tested against a mocked Linear, so I have not yet watched a live agent use it. The change below is one I made to head off an *anticipated* misuse: `create_issue` needs the team's UUID, but the natural thing for an agent to pass is the key it sees in `search_issues` results (`"ENG"`). Rather than return Linear's opaque validation error, `create_issue` looks the team up first and returns `NOT_FOUND` with `action: "Use the id (UUID) of a team returned by list_teams, not its key."` (`test_bad_team_id_points_agent_at_list_teams`). After your first live session, replace this paragraph with what you actually saw.
+> I have not made a code change in response to live use yet, so there is no before/after to report. What I did see in the live Claude Code session (2026-09-30):
+>
+> - **The `assigned_to_me` filter hid the only in-progress issue.** Asked "What are my in-progress issues?", the agent called `search_issues {"assigned_to_me": true, "state_type": "started", "limit": 50}` and got `count: 0`, then answered that there were no in-progress issues. The one in-progress issue, SAM-5, has `assignee: null`. So the answer was correct for issues assigned to me, but the user meant issues in their own workspace. The agent had to be told the team key (`SAM`) before it found SAM-5. A possible fix, not yet made: when `assigned_to_me=true` returns nothing, add a hint to the result saying unassigned issues were excluded.
+> - **Two Linear servers were registered, and the agent picked the other one first.** The claude.ai Linear connector and this local server were both active. The agent went to the claude.ai connector first, which returned nothing, and only then tried this server. For the demonstration below, the agent was told to use only the local server.
+> - **The NOT_FOUND recovery hint was followed only when asked.** When `get_issue {"issue_id": "ENG-9999"}` returned `NOT_FOUND` earlier in the session, the agent did not retry, which is correct. But it asked the user what to do next instead of following the `action` field's advice to call `search_issues`. In the demonstration below, where it was told to follow the recovery guidance, it did.
+> - **Validation from an earlier change:** `create_issue` needs the team's UUID, not its key. Before any live use, I made it look the team up first and return `NOT_FOUND` with `action: "Use the id (UUID) of a team returned by list_teams, not its key."` (`test_bad_team_id_points_agent_at_list_teams`). In the live run, the agent passed the UUID from `list_teams`, so this path was not triggered.
 
 ## Part III: OAuth
 
@@ -52,32 +57,75 @@ Setup: `pip install -r week2/requirements.txt`, create a Linear OAuth app (redir
 
 **End-to-end transcript**: the prompt, the tools that fired with their arguments, the result:
 ```
-Source: MCP client session against the server with Linear mocked (tests/test_protocol.py,
-test_end_to_end_chain_search_then_get). Replace with a live Claude Code transcript after login.
+Source: live Claude Code session, 2026-09-30, local `linear` MCP server (python week2/server.py)
+against the real Linear workspace. The claude.ai Linear connector was not used in this run.
 
-Prompt: "What's the status of the in-progress login issue, and any comments on it?"
+Prompt: "Call list_teams, then search_issues for team SAM with state_type="started", then
+get_issue using the returned identifier. Report the latest comment."
 
-1. search_issues {"text": "login", "state_type": "started", "limit": 2}
-   -> {"ok": true, "count": 2, "issues": [{"identifier": "ENG-1", "title": "Fix login",
-       "state": "In Progress", "state_type": "started", "priority": "High",
-       "assignee": "Sarat", "team_key": "ENG", ...}, {"identifier": "ENG-2", ...}]}
-2. get_issue {"issue_id": "ENG-1"}          # identifier taken from step 1
-   -> {"ok": true, "issue": {"identifier": "ENG-1", "state": "In Progress",
-       "description": "Login broken", "labels": ["bug"],
-       "recent_comments": [{"author": "Sam", "body": "repro'd", ...}]}}
+1. mcp__linear__list_teams {}
+   -> {"ok": true, "teams": [{"id": "86772644-c2ab-4272-986c-657d8a2c8a39",
+       "key": "SAM", "name": "Samhita"}]}
+2. mcp__linear__search_issues {"team_key": "SAM", "state_type": "started"}   # key from step 1
+   -> {"ok": true, "count": 1, "issues": [{"identifier": "SAM-5",
+       "title": "Week 2 MCP live demonstration", "state": "In Progress",
+       "state_type": "started", "priority": "No priority", "assignee": null,
+       "team_key": "SAM", "updated_at": "2026-09-30T23:10:33.896Z",
+       "url": "https://linear.app/samhitak10/issue/SAM-5/week-2-mcp-live-demonstration"}]}
+3. mcp__linear__get_issue {"issue_id": "SAM-5"}                   # identifier from step 2
+   -> {"ok": true, "issue": {"identifier": "SAM-5", "title": "Week 2 MCP live demonstration",
+       "state": "In Progress", "assignee": null, "labels": [],
+       "description": "Next actions:
 
-Answer: ENG-1 "Fix login" is In Progress (High, assigned to Sarat), labelled bug; Sam commented "repro'd".
+- [ ] Create two sample issues. ... (7-item checklist)",
+       "created_at": "2026-09-30T23:09:06.931Z",
+       "recent_comments": [{"author": "samhitakondareddy@gmail.com",
+         "body": "Ready to test the local MCP tool chain. Next step: capture search_issues
+                  followed by get_issue.",
+         "created_at": "2026-09-30T23:10:39.694Z"}]}}
+
+Answer: SAM-5 "Week 2 MCP live demonstration" is In Progress (no priority, unassigned).
+Its latest comment (2026-09-30 23:10 UTC, samhitakondareddy@gmail.com): "Ready to test the
+local MCP tool chain. Next step: capture search_issues followed by get_issue."
+```
+
+**Write tool brake (dry run, declined)**:
+```
+Prompt: "Call create_issue with team_id="86772644-c2ab-4272-986c-657d8a2c8a39",
+title="MCP test", and dry_run=true. Show the preview. I decline creation. Never call dry_run=false."
+
+mcp__linear__create_issue {"team_id": "86772644-c2ab-4272-986c-657d8a2c8a39",
+                           "title": "MCP test", "dry_run": true}   # team_id from list_teams above
+-> {"ok": true, "dry_run": true,
+    "would_create": {"team": "Samhita (SAM)", "title": "MCP test", "description": "",
+                     "priority": "none"},
+    "next": "Show this to the user; if approved, call again with dry_run=false."}
+
+Agent: showed the preview. Because the user declined, it did not call dry_run=false,
+and no issue was created. A later search_issues for team SAM still returned SAM-1 through SAM-6.
 ```
 
 **A failure, handled**: what you provoked, what the agent saw, what it did next:
 ```
-Provoked: get_issue {"issue_id": "ENG-9999"}   (nonexistent ID)
-Agent sees: {"ok": false, "error": {"code": "NOT_FOUND", "message": "Entity not found: Issue",
-             "retryable": false,
-             "action": "Do not retry with the same ID. Get a valid ID from search_issues or list_teams."}}
-Expected next step: the agent does not retry; it calls search_issues to find a valid identifier.
-(Also covered by tests: 429 -> RATE_LIMITED retryable after 42s; revoked refresh token -> AUTH_REQUIRED.)
-Mocked Linear; replace with a live run if you want a real capture.
+Source: same live session, local server, real Linear workspace.
+
+Prompt: "Call get_issue for SAM-9999. Explain the returned error and follow its recovery guidance."
+
+1. mcp__linear__get_issue {"issue_id": "SAM-9999"}           # nonexistent ID, real team key
+   -> {"ok": false, "error": {"code": "NOT_FOUND", "message": "Entity not found: Issue",
+       "retryable": false,
+       "action": "Do not retry with the same ID. Get a valid ID from search_issues or list_teams."}}
+
+Agent's explanation: Linear has no SAM-9999. retryable=false means repeating the call cannot
+succeed, so the agent did not retry it. It followed `action` and searched for valid IDs.
+
+2. mcp__linear__search_issues {"team_key": "SAM", "limit": 10}
+   -> {"ok": true, "count": 6, "issues": [SAM-5 "Week 2 MCP live demonstration" (In Progress),
+       SAM-6 "Week 2 writeup and submission" (Backlog), SAM-3, SAM-1, SAM-4, SAM-2 (Todo)]}
+
+Result: the agent reported that the valid identifiers are SAM-1 to SAM-6, with no tracebacks
+and no retry loop. Tests also cover other failures: 429 -> retryable RATE_LIMITED after 42s;
+revoked refresh token -> AUTH_REQUIRED.
 ```
 
 **Protocol-level test**: what it covers and how to run it:
