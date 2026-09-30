@@ -52,3 +52,10 @@ Thumbs.db
 
 # Vercel
 .vercel/*
+
+# Week 2: real MCP config and cached OAuth tokens
+.mcp.json
+week2/.mcp.json
+token.json
+*.token.json
+.pytest_cache/
