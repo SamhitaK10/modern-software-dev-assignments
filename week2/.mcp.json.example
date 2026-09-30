@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "linear": {
+      "command": "python",
+      "args": ["week2/server.py"],
+      "env": {
+        "LINEAR_CLIENT_ID": "${LINEAR_CLIENT_ID}",
+        "LINEAR_CLIENT_SECRET": "${LINEAR_CLIENT_SECRET}"
+      }
+    }
+  }
+}
