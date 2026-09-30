@@ -53,6 +53,11 @@ def _get_client() -> LinearClient:
     return _client
 
 
+ASSIGNED_TO_ME_EMPTY_HINT = (
+    "No issues matched these filters. Issues without an assignee were excluded. "
+    "To include them, search again with assigned_to_me=false."
+)
+
 PRIORITY_TO_INT = {"none": 0, "urgent": 1, "high": 2, "medium": 3, "low": 4}
 
 ISSUE_FIELDS = """
@@ -111,7 +116,8 @@ async def search_issues(
 
     Returns `issues`: [{identifier, title, state, state_type, priority, assignee, team_key,
     updated_at, url}], newest first. Pass an `identifier` (e.g. "ENG-123") to get_issue for
-    full detail. `team_key` comes from list_teams.
+    full detail. `team_key` comes from list_teams. If assigned_to_me=true matches nothing, the
+    result includes a `hint`: unassigned issues were excluded.
     """
     flt: dict[str, Any] = {}
     if text:
@@ -135,7 +141,10 @@ async def search_issues(
     except ToolError as err:
         return err.to_dict()
     issues = [_shape_issue(n) for n in data["issues"]["nodes"]]
-    return {"ok": True, "count": len(issues), "issues": issues}
+    result: dict[str, Any] = {"ok": True, "count": len(issues), "issues": issues}
+    if assigned_to_me and not issues:
+        result["hint"] = ASSIGNED_TO_ME_EMPTY_HINT
+    return result
 
 
 @mcp.tool(annotations=READ_ONLY)

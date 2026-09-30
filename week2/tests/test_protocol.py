@@ -68,6 +68,8 @@ class FakeLinear:
             self.created += 1
             return httpx.Response(200, json={"data": {"issueCreate": {"success": True, "issue": issue_node(99, body["variables"]["input"]["title"])}}})
         if "issues(filter" in q:
+            if "assignee" in body["variables"]["filter"]:  # workspace issues are all unassigned
+                return httpx.Response(200, json={"data": {"issues": {"nodes": []}}})
             return httpx.Response(200, json={"data": {"issues": {"nodes": [issue_node(1), issue_node(2, "Other")]}}})
         if "issue(id" in q:
             if body["variables"]["id"] != "ENG-1":
@@ -122,6 +124,17 @@ async def test_end_to_end_chain_search_then_get(fake):
     assert detail["issue"]["labels"] == ["bug"] and detail["issue"]["recent_comments"][0]["author"] == "Sam"
     sent = fake.graphql_calls[0]["variables"]["filter"]
     assert sent["state"] == {"type": {"eq": "started"}}
+
+
+async def test_empty_assigned_to_me_search_hints_at_unassigned_issues(fake):
+    """Live session: assigned_to_me=true + started returned 0, hiding unassigned SAM-5."""
+    async with Client(server.mcp) as client:
+        mine = await call(client, "search_issues", {"assigned_to_me": True, "state_type": "started"})
+        everyone = await call(client, "search_issues", {"state_type": "started"})
+    assert mine["ok"] is True and mine["count"] == 0 and mine["issues"] == []
+    assert mine["hint"] == server.ASSIGNED_TO_ME_EMPTY_HINT
+    assert "assigned_to_me=false" in mine["hint"]
+    assert everyone["count"] == 2 and "hint" not in everyone
 
 
 async def test_schema_rejects_bad_enum_before_hitting_linear(fake):
